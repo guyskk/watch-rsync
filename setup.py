@@ -7,6 +7,7 @@ setup(
     description='Watch PATH and rsync to DEST',
     author='guyskk',
     author_email='guyskk@qq.com',
+    url='https://github.com/guyskk/watch-rsync',
     py_modules=['watch_rsync'],
     entry_points={
         'console_scripts': ['watch-rsync=watch_rsync:main']
