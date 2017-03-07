@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='watch-rsync',
-    version='1.0',
+    version='1.1',
     description='Watch PATH and rsync to DEST',
     author='guyskk',
     author_email='guyskk@qq.com',
@@ -12,6 +12,7 @@ setup(
     entry_points={
         'console_scripts': ['watch-rsync=watch_rsync:main']
     },
+    license='MIT',
     install_requires=['sh>=1.0', 'watchdog>=0.6', 'click>=5.0'],
     classifiers=[
         'Development Status :: 5 - Production/Stable',

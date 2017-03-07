@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 # coding: utf-8
 import datetime
+import re
 import time
-from os.path import abspath
+import traceback
+from os.path import abspath, exists, join
 
 import click
 import sh
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+
+RE_GIT_FILE = re.compile(r'^(?:.*/\.git|\.git)(?:/.*)?$')
 
 
 class Watcher(FileSystemEventHandler):
@@ -17,8 +21,11 @@ class Watcher(FileSystemEventHandler):
         self.path = path
         self.dest = dest
         self.duration = duration
+        self.gitignore = join(self.path, '.gitignore')
 
     def on_any_event(self, event):
+        if RE_GIT_FILE.match(event.src_path):
+            return
         what = 'directory' if event.is_directory else 'file'
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         msg = '%s %s %s: %s' % (now, event.event_type, what, event.src_path)
@@ -26,9 +33,14 @@ class Watcher(FileSystemEventHandler):
         click.echo(self.rsync())
 
     def rsync(self):
-        # http://stackoverflow.com/questions/13713101/rsync-exclude-according-to-gitignore-hgignore-svnignore-like-filter-c
-        return sh.rsync('-avz', '--delete', '--exclude', '.git',
-                        '--filter', ':- .gitignore', self.path, self.dest)
+        args = ['-avz', '--delete', '--exclude', '.git']
+        if exists(self.gitignore):
+            args.extend(['--exclude-from', self.gitignore])
+        args.extend([self.path, self.dest])
+        try:
+            return sh.rsync(args)
+        except sh.ErrorReturnCode:
+            traceback.print_exc()
 
     def start(self):
         observer = Observer()
