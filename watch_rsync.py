@@ -2,6 +2,8 @@
 # coding: utf-8
 import datetime
 import re
+import signal
+import sys
 import time
 import traceback
 from os.path import abspath, exists, join
@@ -16,12 +18,18 @@ RE_GIT_FILE = re.compile(r'^(?:.*/\.git|\.git)(?:/.*)?$')
 
 class Watcher(FileSystemEventHandler):
 
-    def __init__(self, path, dest, duration=300):
+    def __init__(self, path, dest, duration=300, timeout=10*1000):
         super(Watcher, self).__init__()
         self.path = path
         self.dest = dest
-        self.duration = duration
+        self.duration = float(duration)/1000
+        self.timeout = float(timeout)/1000
         self.gitignore = join(self.path, '.gitignore')
+        signal.signal(signal.SIGINT, self._handle_sigint)
+        self.events = []
+
+    def _handle_sigint(self, signum, frame):
+        sys.exit('Exiting...')
 
     def on_any_event(self, event):
         if RE_GIT_FILE.match(event.src_path):
@@ -29,28 +37,55 @@ class Watcher(FileSystemEventHandler):
         what = 'directory' if event.is_directory else 'file'
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         msg = '%s %s %s: %s' % (now, event.event_type, what, event.src_path)
-        click.echo(msg.center(79, '-'))
-        click.echo(self.rsync())
+        self.events.append(msg)
 
-    def rsync(self):
+    def _rsync(self):
         args = ['-avz', '--delete', '--exclude', '.git']
         if exists(self.gitignore):
             args.extend(['--exclude-from', self.gitignore])
         args.extend([self.path, self.dest])
-        try:
-            return sh.rsync(args)
-        except sh.ErrorReturnCode:
-            traceback.print_exc()
+        return sh.rsync(args, _timeout=self.timeout)
+
+    def _retry(self, count):
+        """
+        ARGS:
+            count: 已重试次数，重试越多则间隔时间越长
+        """
+        count = min(10, count)
+        click.echo('retry...')
+        time.sleep(self.duration*count)
+
+    def rsync(self):
+        count = 0
+        while True:
+            try:
+                return self._rsync()
+            except sh.TimeoutException:
+                self._retry(count)
+            except:
+                traceback.print_exc()
+                self._retry(count)
+            count += 1
+
+    def polling(self):
+        if not self.events:
+            return
+        msg = self.events.pop()
+        if self.events:
+            msg = '{} and ...{} events'.format(msg, len(self.events))
+            self.events[:] = []
+        click.echo(msg.center(79, '-'))
+        click.echo(self.rsync())
 
     def start(self):
+        self.events.append('watching %s' % abspath(self.path))
         observer = Observer()
         observer.schedule(self, self.path, recursive=True)
         observer.start()
-        click.echo('watching %s' % abspath(self.path))
-        click.echo(self.rsync())
         try:
             while True:
-                time.sleep(float(self.duration)/1000)
+                self.polling()
+                time.sleep(self.duration)
         except KeyboardInterrupt:
             observer.stop()
         observer.join()
@@ -60,7 +95,8 @@ class Watcher(FileSystemEventHandler):
 @click.argument('path', required=True)
 @click.argument('dest', required=True)
 @click.option('-d', '--duration', default=300, help='Watch duration(ms).')
-def main(path, dest, duration):
+@click.option('-t', '--timeout', default=10*1000, help='rsync timeout(ms).')
+def main(path, dest, duration, timeout):
     """
     Watch PATH and rsync to DEST
 
@@ -71,7 +107,7 @@ def main(path, dest, duration):
 
     See also: https://linux.die.net/man/1/rsync
     """
-    watcher = Watcher(path, dest, duration=duration)
+    watcher = Watcher(path, dest, duration=duration, timeout=timeout)
     watcher.start()
 
 
