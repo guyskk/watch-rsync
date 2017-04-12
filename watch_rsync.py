@@ -40,7 +40,7 @@ class Watcher(FileSystemEventHandler):
         self.events.append(msg)
 
     def _rsync(self):
-        args = ['-avz', '--delete', '--exclude', '.git']
+        args = ['-avzpur', '--delete', '--force', '--exclude', '.git']
         if exists(self.gitignore):
             args.extend(['--exclude-from', self.gitignore])
         args.extend([self.path, self.dest])
