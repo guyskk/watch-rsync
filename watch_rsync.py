@@ -12,18 +12,21 @@ import click
 import sh
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
+
 
 RE_GIT_FILE = re.compile(r'^(?:.*/\.git|\.git)(?:/.*)?$')
 
 
 class Watcher(FileSystemEventHandler):
 
-    def __init__(self, path, dest, duration=300, timeout=10*1000):
+    def __init__(self, path, dest, duration=300, timeout=10*1000, use_polling_observer=False):
         super(Watcher, self).__init__()
         self.path = path
         self.dest = dest
-        self.duration = float(duration)/1000
-        self.timeout = float(timeout)/1000
+        self.duration = float(duration) / 1000
+        self.timeout = float(timeout) / 1000
+        self.use_polling_observer = use_polling_observer
         self.gitignore = join(self.path, '.gitignore')
         signal.signal(signal.SIGINT, self._handle_sigint)
         self.events = []
@@ -79,7 +82,10 @@ class Watcher(FileSystemEventHandler):
 
     def start(self):
         self.events.append('watching %s' % abspath(self.path))
-        observer = Observer()
+        if self.use_polling_observer:
+            observer = PollingObserver()
+        else:
+            observer = Observer()
         observer.schedule(self, self.path, recursive=True)
         observer.start()
         try:
@@ -94,9 +100,10 @@ class Watcher(FileSystemEventHandler):
 @click.command()
 @click.argument('path', required=True)
 @click.argument('dest', required=True)
-@click.option('-d', '--duration', default=300, help='Watch duration(ms).')
+@click.option('-d', '--duration', default=300, help='watch duration(ms).')
 @click.option('-t', '--timeout', default=10*1000, help='rsync timeout(ms).')
-def main(path, dest, duration, timeout):
+@click.option('--polling', is_flag=True, help='use polling observer.')
+def main(path, dest, duration, timeout, polling):
     """
     Watch PATH and rsync to DEST
 
@@ -107,7 +114,7 @@ def main(path, dest, duration, timeout):
 
     See also: https://linux.die.net/man/1/rsync
     """
-    watcher = Watcher(path, dest, duration=duration, timeout=timeout)
+    watcher = Watcher(path, dest, duration=duration, timeout=timeout, use_polling_observer=polling)
     watcher.start()
 
 

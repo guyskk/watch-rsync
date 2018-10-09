@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='watch-rsync',
-    version='1.3',
+    version='1.4',
     description='Watch PATH and rsync to DEST',
     author='guyskk',
     author_email='guyskk@qq.com',

@@ -17,13 +17,15 @@ Usage: watch-rsync [OPTIONS] PATH DEST
 
   Example: watch-rsync ./repo host:~/projects
 
-  Note: A trailing slash on the source changes this behavior to avoid
-  creating an additional directory level at the destination.
+  Note: A trailing slash on the PATH changes this behavior to avoid
+  creating an additional directory level at the DEST.
 
   See also: https://linux.die.net/man/1/rsync
 
 Options:
-  -d, --duration INTEGER  Watch duration(ms).
+  -d, --duration INTEGER  watch duration(ms).
+  -t, --timeout INTEGER   rsync timeout(ms).
+  --polling               use polling observer.
   --help                  Show this message and exit.
 ```
 
