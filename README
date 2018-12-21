@@ -4,6 +4,10 @@
 
 ## 安装
 
+直接从 https://github.com/guyskk/watch-rsync/releases 下载可执行文件。
+
+或者
+
 ```
 pip install watch-rsync
 ```
@@ -26,6 +30,8 @@ Options:
   -d, --duration INTEGER  watch duration(ms).
   -t, --timeout INTEGER   rsync timeout(ms).
   --polling               use polling observer.
+  --rsync TEXT            rsync executable.
+  --version               Show the version and exit.
   --help                  Show this message and exit.
 ```
 

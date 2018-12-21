@@ -1,25 +1,26 @@
-#!/usr/bin/env python
 # coding: utf-8
 import datetime
 import re
 import os
 import sys
 import time
-import traceback
-from os.path import abspath, exists, join
+import warnings
 import subprocess
-from subprocess import STDOUT
+from os.path import abspath, join, dirname
 
-import click
+from .__version__ import __version__
 
-try:
-    from watchdog.events import FileSystemEventHandler
+
+VENDOR_PATH = abspath(join(dirname(__file__), 'vendor'))
+sys.path.insert(0, VENDOR_PATH)
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import click
     from watchdog.observers import Observer
     from watchdog.observers.polling import PollingObserver
-except ImportError:
-    from ._watchdog.events import FileSystemEventHandler
-    from ._watchdog.observers import Observer
-    from ._watchdog.observers.polling import PollingObserver
+    from watchdog.events import FileSystemEventHandler
+
 
 RE_GIT_FILE = re.compile(r"^(?:.*/\.git|\.git)(?:/.*)?$")
 
@@ -104,10 +105,10 @@ class Watcher(FileSystemEventHandler):
 
     def _rsync(self):
         args = [self.rsync_path, "-avzpur", "--delete", "--force", "--exclude", ".git"]
-        if exists(self.gitignore):
+        if os.path.exists(self.gitignore):
             args.extend(["--exclude-from", self.gitignore])
         args.extend([self.path, self.dest])
-        p = subprocess.Popen(args, stdout=sys.stdout, stderr=STDOUT)
+        p = subprocess.Popen(args, stdout=sys.stdout, stderr=subprocess.STDOUT)
         return_code = None
         try:
             time_begin = time.time()
@@ -142,13 +143,8 @@ class Watcher(FileSystemEventHandler):
         while True:
             try:
                 return self._rsync()
-            except RsyncException as ex:
-                click.echo(str(ex))
-                self._retry(count)
-            except KeyboardInterrupt:
-                raise
-            except BaseException:
-                traceback.print_exc()
+            except Exception as ex:
+                click.echo(ex)
                 self._retry(count)
             count += 1
 
@@ -168,13 +164,17 @@ class Watcher(FileSystemEventHandler):
             observer = PollingObserver()
         else:
             observer = Observer()
-        observer.schedule(self, self.path, recursive=True)
-        observer.start()
+        try:
+            observer.schedule(self, self.path, recursive=True)
+            observer.start()
+        except OSError as ex:
+            click.echo(ex)
+            return
         try:
             while True:
                 self.polling()
                 time.sleep(self.duration)
-        except KeyboardInterrupt:
+        finally:
             observer.stop()
         observer.join()
 
@@ -186,6 +186,7 @@ class Watcher(FileSystemEventHandler):
 @click.option("-t", "--timeout", default=30 * 1000, help="rsync timeout(ms).")
 @click.option("--polling", is_flag=True, help="use polling observer.")
 @click.option("--rsync", default="rsync", help="rsync executable.")
+@click.version_option(version=__version__)
 def main(path, dest, duration, timeout, polling, rsync):
     """
     Watch PATH and rsync to DEST
@@ -206,7 +207,3 @@ def main(path, dest, duration, timeout, polling, rsync):
         rsync=rsync,
     )
     watcher.start()
-
-
-if __name__ == "__main__":
-    main()
