@@ -11,12 +11,17 @@ import subprocess
 from subprocess import STDOUT
 
 import click
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
-from watchdog.observers.polling import PollingObserver
 
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+    from watchdog.observers.polling import PollingObserver
+except ImportError:
+    from ._watchdog.events import FileSystemEventHandler
+    from ._watchdog.observers import Observer
+    from ._watchdog.observers.polling import PollingObserver
 
-RE_GIT_FILE = re.compile(r'^(?:.*/\.git|\.git)(?:/.*)?$')
+RE_GIT_FILE = re.compile(r"^(?:.*/\.git|\.git)(?:/.*)?$")
 
 
 class RsyncException(Exception):
@@ -30,9 +35,11 @@ def which(program, paths=None):
     used at all.  otherwise, PATH env is used to look for the program """
 
     def is_exe(fpath):
-        return (os.path.exists(fpath) and
-                os.access(fpath, os.X_OK) and
-                os.path.isfile(os.path.realpath(fpath)))
+        return (
+            os.path.exists(fpath)
+            and os.access(fpath, os.X_OK)
+            and os.path.isfile(os.path.realpath(fpath))
+        )
 
     found_path = None
     fpath, fname = os.path.split(program)
@@ -66,32 +73,39 @@ def which(program, paths=None):
 
 
 class Watcher(FileSystemEventHandler):
-
-    def __init__(self, path, dest, duration=300, timeout=10*1000, use_polling_observer=False, rsync='rsync'):
+    def __init__(
+        self,
+        path,
+        dest,
+        duration=300,
+        timeout=10 * 1000,
+        use_polling_observer=False,
+        rsync="rsync",
+    ):
         super(Watcher, self).__init__()
         self.path = path
         self.dest = dest
         self.duration = float(duration) / 1000
         self.timeout = float(timeout) / 1000
         self.use_polling_observer = use_polling_observer
-        self.gitignore = join(self.path, '.gitignore')
+        self.gitignore = join(self.path, ".gitignore")
         self.events = []
         self.rsync_path = which(rsync)
         if not self.rsync_path:
-            raise click.BadParameter('{} not exists or not executable'.format(rsync))
+            raise click.BadParameter("{} not exists or not executable".format(rsync))
 
     def on_any_event(self, event):
         if RE_GIT_FILE.match(event.src_path):
             return
-        what = 'directory' if event.is_directory else 'file'
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        msg = '%s %s %s: %s' % (now, event.event_type, what, event.src_path)
+        what = "directory" if event.is_directory else "file"
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        msg = "%s %s %s: %s" % (now, event.event_type, what, event.src_path)
         self.events.append(msg)
 
     def _rsync(self):
-        args = [self.rsync_path, '-avzpur', '--delete', '--force', '--exclude', '.git']
+        args = [self.rsync_path, "-avzpur", "--delete", "--force", "--exclude", ".git"]
         if exists(self.gitignore):
-            args.extend(['--exclude-from', self.gitignore])
+            args.extend(["--exclude-from", self.gitignore])
         args.extend([self.path, self.dest])
         p = subprocess.Popen(args, stdout=sys.stdout, stderr=STDOUT)
         return_code = None
@@ -107,10 +121,10 @@ class Watcher(FileSystemEventHandler):
                 p.terminate()
         if return_code is None:
             return_code = p.wait()
-            msg = 'rsync timeout and terminated, return code %s' % return_code
+            msg = "rsync timeout and terminated, return code %s" % return_code
             raise RsyncException(msg)
         if return_code != 0:
-            msg = 'rsync failed, return code %s' % return_code
+            msg = "rsync failed, return code %s" % return_code
             raise RsyncException(msg)
         return return_code
 
@@ -120,7 +134,7 @@ class Watcher(FileSystemEventHandler):
             count: 已重试次数，重试越多则间隔时间越长
         """
         sleep_time = min(10, count) * self.duration
-        click.echo('retry#{}...'.format(count + 1))
+        click.echo("retry#{}...".format(count + 1))
         time.sleep(sleep_time)
 
     def rsync(self):
@@ -143,13 +157,13 @@ class Watcher(FileSystemEventHandler):
             return
         msg = self.events.pop()
         if self.events:
-            msg = '{} and ...{} events'.format(msg, len(self.events))
+            msg = "{} and ...{} events".format(msg, len(self.events))
             self.events[:] = []
-        click.echo(msg.center(79, '-'))
+        click.echo(msg.center(79, "-"))
         self.rsync()
 
     def start(self):
-        self.events.append('watching %s' % abspath(self.path))
+        self.events.append("watching %s" % abspath(self.path))
         if self.use_polling_observer:
             observer = PollingObserver()
         else:
@@ -166,12 +180,12 @@ class Watcher(FileSystemEventHandler):
 
 
 @click.command()
-@click.argument('path', required=True)
-@click.argument('dest', required=True)
-@click.option('-d', '--duration', default=300, help='watch duration(ms).')
-@click.option('-t', '--timeout', default=30*1000, help='rsync timeout(ms).')
-@click.option('--polling', is_flag=True, help='use polling observer.')
-@click.option('--rsync', default='rsync', help='rsync executable.')
+@click.argument("path", required=True)
+@click.argument("dest", required=True)
+@click.option("-d", "--duration", default=300, help="watch duration(ms).")
+@click.option("-t", "--timeout", default=30 * 1000, help="rsync timeout(ms).")
+@click.option("--polling", is_flag=True, help="use polling observer.")
+@click.option("--rsync", default="rsync", help="rsync executable.")
 def main(path, dest, duration, timeout, polling, rsync):
     """
     Watch PATH and rsync to DEST
@@ -183,10 +197,16 @@ def main(path, dest, duration, timeout, polling, rsync):
 
     See also: https://linux.die.net/man/1/rsync
     """
-    watcher = Watcher(path, dest, duration=duration, timeout=timeout,
-                      use_polling_observer=polling, rsync=rsync)
+    watcher = Watcher(
+        path,
+        dest,
+        duration=duration,
+        timeout=timeout,
+        use_polling_observer=polling,
+        rsync=rsync,
+    )
     watcher.start()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
