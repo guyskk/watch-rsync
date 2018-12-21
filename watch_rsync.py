@@ -2,14 +2,15 @@
 # coding: utf-8
 import datetime
 import re
-import signal
+import os
 import sys
 import time
 import traceback
 from os.path import abspath, exists, join
+import subprocess
+from subprocess import STDOUT
 
 import click
-import sh
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
@@ -18,9 +19,55 @@ from watchdog.observers.polling import PollingObserver
 RE_GIT_FILE = re.compile(r'^(?:.*/\.git|\.git)(?:/.*)?$')
 
 
+class RsyncException(Exception):
+    """rsync failed"""
+
+
+def which(program, paths=None):
+    """ takes a program name or full path, plus an optional collection of search
+    paths, and returns the full path of the requested executable.  if paths is
+    specified, it is the entire list of search paths, and the PATH env is not
+    used at all.  otherwise, PATH env is used to look for the program """
+
+    def is_exe(fpath):
+        return (os.path.exists(fpath) and
+                os.access(fpath, os.X_OK) and
+                os.path.isfile(os.path.realpath(fpath)))
+
+    found_path = None
+    fpath, fname = os.path.split(program)
+
+    # if there's a path component, then we've specified a path to the program,
+    # and we should just test if that program is executable.  if it is, return
+    if fpath:
+        program = os.path.abspath(os.path.expanduser(program))
+        if is_exe(program):
+            found_path = program
+
+    # otherwise, we've just passed in the program name, and we need to search
+    # the paths to find where it actually lives
+    else:
+        paths_to_search = []
+
+        if isinstance(paths, (tuple, list)):
+            paths_to_search.extend(paths)
+        else:
+            env_paths = os.environ.get("PATH", "").split(os.pathsep)
+            env_paths = [x.strip('"') for x in env_paths]
+            paths_to_search.extend(env_paths)
+
+        for path in paths_to_search:
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                found_path = exe_file
+                break
+
+    return found_path
+
+
 class Watcher(FileSystemEventHandler):
 
-    def __init__(self, path, dest, duration=300, timeout=10*1000, use_polling_observer=False):
+    def __init__(self, path, dest, duration=300, timeout=10*1000, use_polling_observer=False, rsync='rsync'):
         super(Watcher, self).__init__()
         self.path = path
         self.dest = dest
@@ -28,11 +75,10 @@ class Watcher(FileSystemEventHandler):
         self.timeout = float(timeout) / 1000
         self.use_polling_observer = use_polling_observer
         self.gitignore = join(self.path, '.gitignore')
-        signal.signal(signal.SIGINT, self._handle_sigint)
         self.events = []
-
-    def _handle_sigint(self, signum, frame):
-        sys.exit('Exiting...')
+        self.rsync_path = which(rsync)
+        if not self.rsync_path:
+            raise click.BadParameter('{} not exists or not executable'.format(rsync))
 
     def on_any_event(self, event):
         if RE_GIT_FILE.match(event.src_path):
@@ -43,29 +89,51 @@ class Watcher(FileSystemEventHandler):
         self.events.append(msg)
 
     def _rsync(self):
-        args = ['-avzpur', '--delete', '--force', '--exclude', '.git']
+        args = [self.rsync_path, '-avzpur', '--delete', '--force', '--exclude', '.git']
         if exists(self.gitignore):
             args.extend(['--exclude-from', self.gitignore])
         args.extend([self.path, self.dest])
-        return sh.rsync(args, _timeout=self.timeout)
+        p = subprocess.Popen(args, stdout=sys.stdout, stderr=STDOUT)
+        return_code = None
+        try:
+            time_begin = time.time()
+            while time.time() - time_begin <= self.timeout:
+                return_code = p.poll()
+                if return_code is not None:
+                    break
+                time.sleep(0.05)
+        finally:
+            if return_code is None:
+                p.terminate()
+        if return_code is None:
+            return_code = p.wait()
+            msg = 'rsync timeout and terminated, return code %s' % return_code
+            raise RsyncException(msg)
+        if return_code != 0:
+            msg = 'rsync failed, return code %s' % return_code
+            raise RsyncException(msg)
+        return return_code
 
     def _retry(self, count):
         """
         ARGS:
             count: 已重试次数，重试越多则间隔时间越长
         """
-        count = min(10, count)
-        click.echo('retry...')
-        time.sleep(self.duration*count)
+        sleep_time = min(10, count) * self.duration
+        click.echo('retry#{}...'.format(count + 1))
+        time.sleep(sleep_time)
 
     def rsync(self):
         count = 0
         while True:
             try:
                 return self._rsync()
-            except sh.TimeoutException:
+            except RsyncException as ex:
+                click.echo(str(ex))
                 self._retry(count)
-            except:
+            except KeyboardInterrupt:
+                raise
+            except BaseException:
                 traceback.print_exc()
                 self._retry(count)
             count += 1
@@ -78,7 +146,7 @@ class Watcher(FileSystemEventHandler):
             msg = '{} and ...{} events'.format(msg, len(self.events))
             self.events[:] = []
         click.echo(msg.center(79, '-'))
-        click.echo(self.rsync())
+        self.rsync()
 
     def start(self):
         self.events.append('watching %s' % abspath(self.path))
@@ -101,9 +169,10 @@ class Watcher(FileSystemEventHandler):
 @click.argument('path', required=True)
 @click.argument('dest', required=True)
 @click.option('-d', '--duration', default=300, help='watch duration(ms).')
-@click.option('-t', '--timeout', default=10*1000, help='rsync timeout(ms).')
+@click.option('-t', '--timeout', default=30*1000, help='rsync timeout(ms).')
 @click.option('--polling', is_flag=True, help='use polling observer.')
-def main(path, dest, duration, timeout, polling):
+@click.option('--rsync', default='rsync', help='rsync executable.')
+def main(path, dest, duration, timeout, polling, rsync):
     """
     Watch PATH and rsync to DEST
 
@@ -114,7 +183,8 @@ def main(path, dest, duration, timeout, polling):
 
     See also: https://linux.die.net/man/1/rsync
     """
-    watcher = Watcher(path, dest, duration=duration, timeout=timeout, use_polling_observer=polling)
+    watcher = Watcher(path, dest, duration=duration, timeout=timeout,
+                      use_polling_observer=polling, rsync=rsync)
     watcher.start()
 
 

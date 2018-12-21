@@ -13,7 +13,7 @@ setup(
         'console_scripts': ['watch-rsync=watch_rsync:main']
     },
     license='MIT',
-    install_requires=['sh>=1.0', 'watchdog>=0.6', 'click>=5.0'],
+    install_requires=['watchdog>=0.6', 'click>=5.0'],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
